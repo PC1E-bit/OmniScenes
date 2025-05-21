@@ -85,6 +85,16 @@ def find_stage_all_lights(stage):
             light_num += 1
     return light_num
 
+def move_merged_group(usd_path):
+    stage = Usd.Stage.Open(usd_path)
+    prim = stage.GetPrimAtPath("/Root/Instance")
+    bbox = compute_bbox(prim)
+    min_p = bbox.min
+    max_p = bbox.max
+    center = (min_p + max_p)/2
+    prim_xformable = UsdGeom.Xformable(prim)
+    prim_xformable.AddTranslateOp().Set(-center)
+    stage.Save()
 
 def enumerate_lights(stage):
     light_types = [
@@ -162,6 +172,26 @@ def IsObjXform(prim):
             return True
     return False
 
+def IsNestedXform(prim):
+    '''
+    Arg:
+        prim (Usd.Prim): The prim to check if it is a nested xform. The prim must be a xform.
+    '''
+    while len(prim.GetChildren()) == 1 and prim.GetChildren()[0].IsA(UsdGeom.Xform):
+        prim = prim.GetChildren()[0]
+
+    return prim
+
+def is_all_light_xform(prim):
+    light_count = 0
+    for child in prim.GetChildren():
+        if child.GetTypeName() in ['CylinderLight', 'DistantLight', 'DomeLight', 'DiskLight', 'GeometryLight', 'RectLight', 'SphereLight']:
+            light_count += 1
+    if light_count == len(prim.GetChildren()):
+        return True
+    else:
+        return False
+
 def strip_world_prim(world_prim):
     prims = [p for p in world_prim.GetAllChildren() if p.IsA(UsdGeom.Mesh) or p.IsA(UsdGeom.Xform) and not IsEmpty(p) and IsObjXform(p)]
     if len(prims) == 1:
@@ -204,8 +234,17 @@ def remove_bad_prims(stage):
         else:
            continue
 
+def get_transform_from_prim(prim):
+    prim_imageable = UsdGeom.Imageable(prim)
+    # xform_world_transform = np.array(
+    #     prim_imageable.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+    # )
+    xform_world_transform = prim_imageable.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+    return xform_world_transform
 
-# --------------------usd material functions------------------------
+
+
+# --------------------mdl functions------------------------
 
 
 
@@ -284,7 +323,37 @@ def norm_coords(coords):
     norm_coords = (coords - min_coords) / np.max((max_coords - min_coords))
     return norm_coords
 
-
+def convert_usd_to_points(stage, meters_per_unit, json_data, use_json_data=True, sample_points_number = 100000):
+    remove_empty_prims(stage)
+    world_prim = stage.GetPrimAtPath("/World")
+    scene_root = strip_world_prim(world_prim)
+    noise_list = []
+    if use_json_data:
+        for prim_info in json_data:
+            prim_name = prim_info['name'].replace("_MightBeGlass", "")
+            prim_type = prim_info['feedback']
+            if prim_type == 'confirm':
+                noise_list.append(prim_name)
+        print(noise_list)
+    prims_all = [p for p in scene_root.GetAllChildren() if p.IsA(UsdGeom.Mesh) or p.IsA(UsdGeom.Xform) and not IsEmpty(p) and IsObjXform(p)]
+    pcs_all = []
+    
+    for prim in prims_all:
+        if prim.GetName() in noise_list:
+            continue
+        try:
+            pcs, mesh = sample_points_from_prim(prim, sample_points_number)
+            pcs_all.append(pcs)
+            print(prim.GetName())
+        except:
+            prims_all.remove(prim)
+            continue
+    pcs_all = np.concatenate(pcs_all, axis=0) * meters_per_unit
+    scene_pcd = o3d.geometry.PointCloud()
+    scene_pcd.points = o3d.utility.Vector3dVector(pcs_all)
+    scene_pcd.colors = o3d.utility.Vector3dVector(np.ones_like(pcs_all)*0.4)
+    scene_pcd = scene_pcd.voxel_down_sample(0.05)
+    return scene_pcd, prims_all
 
 def recursive_parse_new(prim):
 
@@ -439,3 +508,24 @@ def filter_free_noise(pcd, plane='xy', visualize=False):
     if visualize:
         o3d.visualization.draw_geometries([pcd])
     return pcd
+
+
+def get_prims_from_xyz_bounding(prims, min_point, max_point):
+    min_x, min_y, min_z = min_point
+    max_x, max_y, max_z = max_point
+
+    prims_in_xyz_bounding = []
+    prims_out_xyz_bounding = []
+    for prim in prims:
+        bbox = compute_bbox(prim)
+        bbox_min, bbox_max = bbox.GetMin(), bbox.GetMax()
+        prim_center = (bbox_min + bbox_max) / 2
+
+        prim_center_x, prim_center_y, prim_center_z = prim_center
+
+        if min_x <= prim_center_x <= max_x and min_y <= prim_center_y <= max_y and min_z <= prim_center_z <= max_z:
+            prims_in_xyz_bounding.append(prim)
+        else:
+            prims_out_xyz_bounding.append(prim)
+
+    return prims_in_xyz_bounding, prims_out_xyz_bounding
