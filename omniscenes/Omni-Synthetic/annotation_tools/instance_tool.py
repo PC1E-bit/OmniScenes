@@ -8,7 +8,7 @@ import numpy as np
 import json
 import trimesh
 from collections import defaultdict
-from data_utils import *
+from utils.instance_utils import *
 import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--user_id", type=int, default=0)

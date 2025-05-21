@@ -1,28 +1,3 @@
-####################  使用方式  #######################################
-# 目的是给定当前俯视图，通过在图上选点框定图上的功能区域
-# 单个scene的标注流程
-# 1. 点击"Input file”框，根据文件名选择需要标注的图片
-# 2. 不断重复以下流程，直到标完所有功能区
-#   a. 拖动“Vertex Number”滑块，选择多边形的顶点个数
-#   b. 在”Image”框中点Vertex Number个点，即选中了多边形
-#   c. 在”Lable”框中选择label，即该区域提供的功能
-#   d. 点击“Annotate”，完成一个多边形的标注
-#     i. “Selected Polygon”和“Label”会被自动清空
-#     ii. 如果顶点的数量不匹配，或者没有label则会清空当前多边形
-# 3. 点击“Save to file”，整张图片的标注数据会被保存
-# 其他说明
-# 1. “Clear”会清空对于当前图片*所有*的标注，谨慎点击
-# 2. 当前标注会展现在“Annotation History”中
-######################################################################
-# -*- coding:utf-8 –*-
-
-#TODO: modify the paths
-
-sourcedir = "/root/projects/GRRegion_annotation/data"
-output_dir = '/root/projects/GRRegion_annotation/output'
-
-
-
 import os
 import pickle
 import cv2
@@ -33,11 +8,15 @@ import json
 import open3d as o3d
 
 # from render_bev_for_all import load_mesh, _render_2d_bev, take_bev_screenshot, process_mesh
-from region_matching import get_data, get_position_in_mesh_render_image, is_in_poly
+from utils.region_utils import get_data, get_position_in_mesh_render_image, is_in_poly
 import matplotlib
 import copy
 import os
 import argparse
+
+sourcedir = "/root/projects/GRRegion_annotation/data"
+output_dir = '/root/projects/GRRegion_annotation/output'
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--port", type=int, default=7921)
 parser.add_argument("--part", type=int, required=True)
@@ -89,29 +68,22 @@ def get_next_scene_id(current_scene_id):
             return SCENE_LIST[index + 1]
             
 REGIONS = {
-    "living region": "living region",         # 办公大厅(134)、接待室(547)、大厅(2309)、中庭(42)
-    "study region": "study region",          # 办公室(3275)、报告厅(1144)
-    "resting region": "resting region",        # 宿舍(27)、酒店(5380)、民宿(1301)
-    "dining region": "dining region",         # 包厢(1765)、食堂(1397)、中餐厅(896)、西餐厅(703)、快餐店(285)、面馆(91)
-    "cooking region": "cooking region",        # 后厨(429)、茶水间(937) 
-    "storage region": "storage region",        # 储藏室相关
-    "toilet region": "toilet region",         # 公共卫生间(1240)、更衣室(57)、 公共卫生间(1240)
-    "balcony region": "balcony region",        # 外摆(66)
-    "retail region": "retail region",         # 商场(202)、超市(31)、便利店(13)、书店(3)、售楼处(86)等各类专卖店
-    "entertainment region": "entertainment region",  # 包含：
-                                            # 电竞房(353)、酒吧(1482)、KTV(1437)、电影院(487)、网吧(473)，健身房(499)、
-                                            # 游泳馆(2)、体育馆(2)、瑜伽室(15)，美容院(472)、美发店(488)、美甲店(41)、
-                                            # 展览展厅(16)、博物馆(5)、荣誉室(8)
-    "education region": "education region",      # 学校(298)、教室(131)、图书馆(22)、实验室(27)、
-    "corridor region": "corridor region",       # 走廊(1439)
-    "elevator stairsregion": "elevator_stairs_region", # 电梯间(1244)、楼梯间(829)
-    "public service region": "public_service region",  # 包含：
-                                            # - 服务中心(946)：提供各类公共服务
-                                            # - 银行(732)：提供金融服务
-                                            # - 党政机关(31)：提供行政服务
-                                            # - 医院(163)：提供医疗服务
-                                            # -机场(14)、车站(10)、室内停车场(168)
-    "other region": "other region"            # 其他未分类区域                           
+    "living region": "living region",    
+    "study region": "study region",          
+    "resting region": "resting region",        
+    "dining region": "dining region",         
+    "cooking region": "cooking region",        
+    "storage region": "storage region",       
+    "toilet region": "toilet region",        
+    "balcony region": "balcony region",        
+    "retail region": "retail region",         
+    "entertainment region": "entertainment region",  
+    "education region": "education region",      
+    "corridor region": "corridor region",       
+    "elevator stairsregion": "elevator_stairs_region", 
+    "public service region": "public_service region",  
+
+    "other region": "other region"                                   
 }
     
 REGIONS_COLOR = {
@@ -132,33 +104,6 @@ REGIONS_COLOR = {
     "other region": (122, 122, 0)        
 }
     
-# REGIONS = {"起居室/会客区": "living region",
-#            "书房/工作学习区": "study region",
-#            "卧室/休息区": "resting region", # previously "sleeping region"
-#            "饭厅/进食区": "dinning region",
-#            "厨房/烹饪区": "cooking region",
-#            "浴室/洗澡区": "bathing region",
-#            "储藏/收纳区": "storage region",
-#            "厕所/洗手间": "toilet region",
-#            "运动区/健身房": "sports region",
-#            "走廊/通道": "corridor region",
-#            "开放（室外）空地": "open area region",
-
-#            "其它": "other region"}
-# REGIONS_COLOR = {
-#     "living region": (0, 0, 255),
-#     "study region": (0, 255, 0),
-#     "resting region": (255, 0, 0),
-#     "dinning region": (0, 255, 255),
-#     "cooking region": (255, 255, 0),
-#     "bathing region": (255, 20, 147),
-#     "storage region": (122, 255, 122),
-#     "toliet region": (69, 139, 0),
-#     "sports region": (139, 69, 19),
-#     "corridor region": (139, 105, 20),
-#     "open area region": (255, 0, 255),
-#     "other region": (122, 122, 0)
-# }
 REGIONS_COLOR = {k: np.array(v) for k, v in REGIONS_COLOR.items()}
 
 
@@ -204,20 +149,20 @@ with gr.Blocks() as demo:
     user_name_locked = gr.State(False)
 
     with gr.Row():
-        user_name = gr.Textbox(label="用户名", value="", placeholder="在此输入用户名，首位必须为字母，不要带空格。")
-        view_only = gr.Checkbox(label="只读模式", value=False)
-        confirm_user_name_btn = gr.Button(value="确认并锁定用户名（刷新网页才能重置用户名）", label="确认用户名")
-        check_annotated_btn = gr.Button(value="查看未标注场景数", label="查看未标注")
+        user_name = gr.Textbox(label="user name", value="", placeholder="Please enter your name, the first character must be an alphabet, and do not include spaces.")
+        view_only = gr.Checkbox(label="view only mode", value=False)
+        confirm_user_name_btn = gr.Button(value="confirm and lock user name (refresh the page to reset the name)", label="confirm user name")
+        check_annotated_btn = gr.Button(value="check the number of unannotated scenes", label="check annotated")
     with gr.Row():
-        scene_id = gr.Dropdown(SCENE_LIST, label="在此选择待标注的场景")
-        scene_anno_info = gr.Textbox(label="提示信息", value="", visible=True, interactive=False)
-    anno_result_img = gr.Image(label="result of annotation", interactive=True, tool=[], height=400)
-    show_label_box = gr.Textbox(label="点击区域的类别（根据标注文件）")
+        scene_id = gr.Dropdown(SCENE_LIST, label="select the scene to be annotated")
+        scene_anno_info = gr.Textbox(label="annotation information", value="", visible=True, interactive=False)
+    anno_result_img = gr.Image(label="annotation result", interactive=True, tool=[], height=400)
+    show_label_box = gr.Textbox(label="click the region type")
 
     total_vertex_num = gr.Slider(
         visible=False,
         label="Vertex Number",
-        info="拖动滑块选择多边形的顶点个数",
+        info="",
         minimum=3,
         maximum=20,
         step=1,
@@ -227,7 +172,7 @@ with gr.Blocks() as demo:
 
     def check_user_name_validity(user_name):
         if len(user_name) == 0 or ' ' in user_name or not user_name[0].isalpha():
-            gr.Warning("用户名不合法。请首位必须为字母，并不要带空格。请重新输入。")
+            gr.Warning("User name is invalid, please check and try again.")
             return False
         return True
 
@@ -235,7 +180,7 @@ with gr.Blocks() as demo:
     def lock_user_name(user_name, user_name_locked):
         if check_user_name_validity(user_name):
             user_name = user_name.strip()
-            user_name = gr.Textbox(label="用户名", value=user_name, interactive=False)
+            user_name = gr.Textbox(label="user name", value=user_name, interactive=False)
             user_name_locked = True
         return user_name, user_name_locked
     confirm_user_name_btn.click(lock_user_name, inputs=[user_name, user_name_locked],
@@ -252,7 +197,7 @@ with gr.Blocks() as demo:
         num_in_total = len(SCENE_LIST)
         num_missing = len(missing_scenes)
         missing_scenes.sort()
-        gr.Info(f"未标注场景数：{num_missing}/{num_in_total}")
+        gr.Info(f"unannotated scenes: {num_missing}/{num_in_total}")
         return missing_scenes
     check_annotated_btn.click(check_annotated_scenes, inputs=[user_name], outputs=[scene_anno_info])
 
@@ -266,7 +211,7 @@ with gr.Blocks() as demo:
         to_show_areas = False
 
         if not user_name_locked:
-            gr.Warning("请先确认并锁定用户名")
+            gr.Warning("Please confirm your user name first.")
             return None, None, None, None, None, '', None, annotation_list, click_evt_list, vertex_list, poly_done, item_dict_list, anno_result, to_show_areas,0,[]
 
         if scene_id == None or scene_id == 'None':
@@ -283,12 +228,12 @@ with gr.Blocks() as demo:
         file_path_to_save = os.path.join(output_dir, scene_id, f'region_segmentation_{user_name}.txt')
         anno_result_img_path = gr.update(value=render_image_path)
         if os.path.exists(file_path_to_save):
-            scene_anno_state = scene_id + ' 已经被标注过 ! ! ! ! !'
-            gr.Info("该场景已经被标注过，若非必要请不要重复标注")
+            scene_anno_state = scene_id + ' has been annotated ! ! ! ! !'
+            gr.Info("This scene has been annotated.")
             anno_result = get_data(file_path_to_save)
             to_show_areas = True
         else:
-            scene_anno_state = scene_id + ' 需要标注'
+            scene_anno_state = scene_id + ' need to be annotated'
             anno_result = []
 
         return render_image_path, render_image_path.replace('bev_map.jpg', 'pos.jpg'), \
@@ -297,10 +242,10 @@ with gr.Blocks() as demo:
 
 
     with gr.Row():
-        input_img = gr.Image(label="标注画布", tool=[], height=600, width=600)
-        output_img = gr.Image(label="实时绘制", tool=[], height=600, width=600)
+        input_img = gr.Image(label="annotation image", tool=[], height=600, width=600)
+        output_img = gr.Image(label="", tool=[], height=600, width=600)
 
-    btn_finish = gr.Button("完成绘制")
+    btn_finish = gr.Button("finish drawing")
     vertex_list = gr.State([])
     poly_done = gr.State(False)
     store_vertex_list = gr.State([])
@@ -312,14 +257,14 @@ with gr.Blocks() as demo:
                      )
 
     custom_label_input = gr.Textbox(
-        label="自定义房间类型",
+        label="custom region type",
         visible=False,
-        placeholder="请输入具体房间类型名称",
+        placeholder="Please enter the custom region type here",
         interactive=True
     )
 
     def toggle_custom_input(selected_label):
-        return gr.Textbox(visible=(selected_label == "其他功能区"))
+        return gr.Textbox(visible=(selected_label == "other region"))
 
     label.change(
         fn=toggle_custom_input,
@@ -351,10 +296,10 @@ with gr.Blocks() as demo:
         label = gr.Radio(REGIONS.keys(), label="label", visible=not view_only)
         total_vertex_num = gr.Slider(label="Vertex Number", visible=not view_only,
                                      minimum=3, maximum=20, step=1, value=4)
-        annotate_btn = gr.Button("标注单个区域", visible=not view_only)
-        undo_btn = gr.Button("回退一步", visible=not view_only)
-        save_btn = gr.Button("所有区域都已经标注完成，保存", visible=not view_only)
-        clear_btn = gr.Button("清空当前场景所有标注（谨慎操作）", visible=not view_only)
+        annotate_btn = gr.Button("annotate a single region", visible=not view_only)
+        undo_btn = gr.Button("undo the last annotation", visible=not view_only)
+        save_btn = gr.Button("all regions have been annotated. save it.", visible=not view_only)
+        clear_btn = gr.Button("clear all annotations in the current scene (with caution).", visible=not view_only)
         return input_img, output_img, label, total_vertex_num, annotate_btn, undo_btn, save_btn, clear_btn
     view_only.change(fn=view_only_mode, inputs=[view_only], outputs=[input_img, output_img, label, total_vertex_num, annotate_btn, undo_btn, save_btn, clear_btn])
 
@@ -541,9 +486,9 @@ with gr.Blocks() as demo:
             return None, None, None
 
         if poly_done and label is not None:
-            if label == "其他功能区":
+            if label == "other region":
                 if not custom_label.strip():
-                    gr.Warning("请填写具体房间类型名称！")
+                    gr.Warning("Please enter the custom region type.")
                     return label, output_img, annotation_list, poly_done, vertex_list, click_evt_list, \
                         annotation_list, store_vertex_list, to_show_areas, anno_result, item_dict_list
                 final_label = custom_label.strip()
@@ -574,7 +519,7 @@ with gr.Blocks() as demo:
             return None, None, annotation_list, poly_done, vertex_list, click_evt_list, \
                 annotation_list, store_vertex_list, to_show_areas, anno_result, item_dict_list
         else:
-            gr.Info('多边形顶点数不匹配或没有标签！请重新（继续）标注。')
+            gr.Info('Polygen has not been finished yet. Please finish the polygon first.')
             return label, output_img, annotation_list, poly_done, vertex_list, click_evt_list, \
                 annotation_list, store_vertex_list, to_show_areas, anno_result, item_dict_list
 
