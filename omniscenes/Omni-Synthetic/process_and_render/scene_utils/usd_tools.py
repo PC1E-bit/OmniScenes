@@ -162,6 +162,18 @@ def IsEmpty(prim):
     else:
         return False
 
+def is_bad_prim(prim):
+    if prim.IsA(UsdGeom.Mesh) or prim.IsA(UsdGeom.Xform):
+        bbox = compute_bbox(prim)
+        scale = np.array(bbox.max - bbox.min)
+        zero_num = np.sum(np.isclose(scale, 0, atol=1e-2))
+        nan_num = np.sum(np.isnan(scale))
+        if zero_num > 0 or nan_num > 0:
+            return True
+        else:
+            return False
+
+
 def IsObjXform(prim):
     if prim.IsA(UsdGeom.Mesh):
         return True
@@ -183,12 +195,15 @@ def IsNestedXform(prim):
     return prim
 
 def is_all_light_xform(prim):
-    light_count = 0
-    for child in prim.GetChildren():
-        if child.GetTypeName() in ['CylinderLight', 'DistantLight', 'DomeLight', 'DiskLight', 'GeometryLight', 'RectLight', 'SphereLight']:
-            light_count += 1
-    if light_count == len(prim.GetChildren()):
-        return True
+    if prim.GetTypeName() == "Xform":
+        light_count = 0
+        for child in prim.GetChildren():
+            if child.GetTypeName() in ['CylinderLight', 'DistantLight', 'DomeLight', 'DiskLight', 'GeometryLight', 'RectLight', 'SphereLight']:
+                light_count += 1
+        if light_count == len(prim.GetChildren()):
+            return True
+        else:
+            return False
     else:
         return False
 
@@ -234,12 +249,31 @@ def remove_bad_prims(stage):
         else:
            continue
 
+def get_prims(stage) -> list:
+    # stage = Usd.Stage.Open(usd_path)
+    remove_empty_prims(stage)
+    world_prim = stage.GetPrimAtPath('/World')
+    scene_root = strip_world_prim(world_prim)
+    prims_all = [p for p in scene_root.GetAllChildren() if p.IsA(UsdGeom.Mesh) or p.IsA(UsdGeom.Xform) and not IsEmpty(p) and IsObjXform(p)]
+    return prims_all
+
+
+def get_prims_wo_structure(stage):
+
+    instance_prims = []
+    instance_scope = stage.GetPrimAtPath("/World/Instances")    # the cleaned usd file
+    for instance in instance_scope.GetAllChildren():
+        for child in instance.GetAllChildren():
+            instance_prims.append(child)
+    return instance_prims
+
+
 def get_transform_from_prim(prim):
     prim_imageable = UsdGeom.Imageable(prim)
-    # xform_world_transform = np.array(
-    #     prim_imageable.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
-    # )
-    xform_world_transform = prim_imageable.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+    xform_world_transform = np.array(
+        prim_imageable.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+    )
+    # xform_world_transform = prim_imageable.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
     return xform_world_transform
 
 
@@ -295,8 +329,8 @@ def fix_mdls(usd_path, default_mdl_path):
                             write_file(asset_fn, new_content)
                         elif os.path.getsize(asset_fn) < 1:
                             print("Find wrong size file " + asset_fn + ' ' + str(os.path.getsize(asset_fn)))
-    if need_to_save:
-        stage.Save()
+    # if need_to_save:
+    #     stage.Save()
 
 
 
@@ -308,20 +342,20 @@ def to_list(data):
         res = [_ for _ in data]
     return res
 
-def downsample_point_cloud(point_cloud, target_points):
+# def downsample_point_cloud(point_cloud, target_points):
 
-    if target_points >= point_cloud.shape[0]:
-        return point_cloud
-    indices = np.random.choice(point_cloud.shape[0], target_points, replace=False)
-    downsampled_point_cloud = point_cloud[indices]
-    return downsampled_point_cloud
+#     if target_points >= point_cloud.shape[0]:
+#         return point_cloud
+#     indices = np.random.choice(point_cloud.shape[0], target_points, replace=False)
+#     downsampled_point_cloud = point_cloud[indices]
+#     return downsampled_point_cloud
 
-def norm_coords(coords):
+# def norm_coords(coords):
 
-    min_coords = np.min(coords, axis=0)
-    max_coords = np.max(coords, axis=0)
-    norm_coords = (coords - min_coords) / np.max((max_coords - min_coords))
-    return norm_coords
+#     min_coords = np.min(coords, axis=0)
+#     max_coords = np.max(coords, axis=0)
+#     norm_coords = (coords - min_coords) / np.max((max_coords - min_coords))
+#     return norm_coords
 
 def convert_usd_to_points(stage, meters_per_unit, json_data, use_json_data=True, sample_points_number = 100000):
     remove_empty_prims(stage)

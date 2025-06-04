@@ -10,7 +10,7 @@ from sklearn.cluster import DBSCAN
 from typing import Union, List
 from mathutils import Matrix, Vector, Euler
 
-from .usd_utils import compute_bbox, sample_points_from_prim
+from .usd_tools import compute_bbox, sample_points_from_prim
 
 # Function that calculate pairwise pointcloud distance
 def pointcloud_distance(pcdA,pcdB,device='cpu'):
@@ -242,7 +242,7 @@ def extract_floor_heights(scene_pcd_points):
     plt.hlines(
         min_peak_height, np.min(z_hist[1]), np.max(z_hist[1]), colors="r"
     )
-    plt.savefig("floor_histogram.png")
+    # plt.savefig("floor_histogram.png")
     peaks_locations = z_hist[1][peaks]
     clustering = DBSCAN(eps=1, min_samples=1).fit(peaks_locations.reshape(-1, 1))
     labels = clustering.labels_
@@ -263,7 +263,7 @@ def extract_floor_heights(scene_pcd_points):
             z_hist_smooth[peaks[labels == i]],
             "o",
         )
-    plt.savefig("floor_histogram_cluster.png")
+    # plt.savefig("floor_histogram_cluster.png")
 
     # for each cluster find the top 2 peaks
     clustred_peaks = []
