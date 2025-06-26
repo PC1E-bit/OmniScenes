@@ -25,15 +25,15 @@ import numpy as np
 from PIL import Image
 from scipy.spatial.transform import Rotation as R
 
-from scene_utils.usd_tools import compute_bbox, is_bad_prim
-from scene_utils.usd_tools import get_prims_wo_structure, sample_points_from_prim, get_transform_from_prim, is_all_light_xform
-from scene_utils.pcd_tools import norm_coords, paint_color, paint_pure_color, paint_plane_color, transform_pc, downsample_mesh_naive
+from scene_utils.usd_tools import compute_prim_bbox, is_bad_prim
+from scene_utils.usd_tools import get_prims_wo_structure, sample_points_from_prim, get_transform_from_prim, is_all_light_xform, visiblePrims
+from scene_utils.pcd_tools import normalize_point_cloud, paint_color, paint_pure_color, transform_point_cloud
 
 # omni.kit.commands.execute('ChangeSetting', path='/rtx/post/histogram/enabled', value=True)
 # omni.kit.commands.execute('ChangeSetting', path='/rtx/post/histogram/whiteScale', value=5.5)
 # # omni.kit.commands.execute('ChangeSetting', path='/rtx/post/histogram/minEV', value=500.0)
 
-
+# Function to compute the camera quaternion
 def compute_camera_quaternion(target_position, camera_position, up_vector=np.array([0, 0, 1])):
     forward_vector = np.array(camera_position) - np.array(target_position)
     forward_vector = forward_vector / np.linalg.norm(forward_vector)  
@@ -46,7 +46,7 @@ def compute_camera_quaternion(target_position, camera_position, up_vector=np.arr
     quaternion = R.from_matrix(rotation_matrix).as_quat()
     return np.array([quaternion[3], quaternion[0], quaternion[1], quaternion[2]])
 
-
+# Function to compute the camera quaternion for pcd
 def compute_camera_quaternion_pcd(camera_position, target_position):
     forward_vector = np.array(target_position) - np.array(camera_position)
     forward_vector = forward_vector / np.linalg.norm(forward_vector)  # Normalize the vector
@@ -64,13 +64,12 @@ def compute_camera_quaternion_pcd(camera_position, target_position):
         quaternion = R.from_rotvec(rotation_angle * rotation_axis).as_quat()
     return np.array([quaternion[3], quaternion[0], quaternion[1], quaternion[2]])
 
-
-
 def render_thumbnails(model_path, model_name, output_dir, render_method, world, cameras):
     '''
     Render the thumbnails of given model, save the images or video.
-    Input: The usd model path
-    Output: The rendered images or video.
+
+    :Input: The usd model path
+    :Output: The rendered images or video.
 
     Args:
         model_path: the path of the model usd file
@@ -93,6 +92,7 @@ def render_thumbnails(model_path, model_name, output_dir, render_method, world, 
     except:
         pass
     prim = create_prim(show_prim_path, position=(0,0,0), scale=(1, 1, 1), usd_path=model_path)
+    visiblePrims(prim)
     stage = omni.usd.get_context().get_stage()
     prim_check_path = "/World/Show/Instance"
     prim_check = stage.GetPrimAtPath(prim_check_path)
@@ -105,38 +105,38 @@ def render_thumbnails(model_path, model_name, output_dir, render_method, world, 
         print("prim created")
     
     # Get the model's bbox to place the cameras
-    bbox = compute_bbox(prim)
+    bbox = compute_prim_bbox(prim)
     min_point = np.array(bbox.min)
     max_point = np.array(bbox.max)
     mx,my,mz = max_point - min_point
     center = (min_point + max_point) * 0.5
-    max_l = np.sqrt(mx*mx + my*my + mz*mz) / 2
-    distance = 1.5 * max_l * 1.732
+    max_l = np.sqrt(mx*mx + my*my + mz*mz)
+    distance = max_l * 1.3
 
     # Render and save
     if render_method == 'images':
         # Place the cameras
         for idx, camera in enumerate(cameras):
             base_dir = 0
-            delta = np.pi/4
-            if idx < 8:
+            delta = np.pi/12
+            if idx < 24:
                 alpha = base_dir + idx * delta
                 base_vec = np.array([np.cos(alpha), np.sin(alpha), -np.sin(np.pi/4)])
                 camera_position = center - base_vec * (max_l + distance)
-            elif idx < 12:
-                alpha = np.pi/4 + (idx - 8) * delta * 2 
+            elif idx < 27:
+                alpha = (idx - 27) * delta * 8
                 base_vec = np.array([np.cos(alpha), np.sin(alpha), -np.sin(np.pi/4)])
                 camera_position = center + base_vec * (max_l + distance)
-            elif idx == 12:
-                camera_position = center - np.array([0, 0, 1.5*max_l + distance])
-                orient = rot_utils.euler_angles_to_quats(np.array([0.0, -90.0, 90.0]), degrees=True)
-                camera.set_world_pose(camera_position, orient)
-                continue
-            elif idx == 13:
-                camera_position = center + np.array([0, 0, 1.5*max_l + distance])
-                orient = rot_utils.euler_angles_to_quats(np.array([0.0, 90.0, 90.0]), degrees=True)
-                camera.set_world_pose(camera_position, orient)
-                continue
+            # elif idx == 12:
+            #     camera_position = center - np.array([0, 0, 1.5*max_l + distance])
+            #     orient = rot_utils.euler_angles_to_quats(np.array([0.0, -90.0, 90.0]), degrees=True)
+            #     camera.set_world_pose(camera_position, orient)
+            #     continue
+            # elif idx == 13:
+            #     camera_position = center + np.array([0, 0, 1.5*max_l + distance])
+            #     orient = rot_utils.euler_angles_to_quats(np.array([0.0, 90.0, 90.0]), degrees=True)
+            #     camera.set_world_pose(camera_position, orient)
+            #     continue
             orient = compute_camera_quaternion(center, camera_position)
             camera.set_world_pose(camera_position, orient, camera_axes = "usd")
 
@@ -212,18 +212,17 @@ def render_thumbnails(model_path, model_name, output_dir, render_method, world, 
     return render_and_save
 
 def get_thumbnails_pipeline(usd_models_path, dest_dir, render_method):
-
     '''
     The pipeline of getting the thumbnails. Loop processing all the models in the given path.
-    Args:
-        usd_models: The path contains all instance models in one scene
-        dest_dir: The output directory to save the rendered images or video
+
+    :param usd_models: The path contains all instance models in one scene
+    :param dest_dir: The output directory to save the rendered images or video
     '''    
 
     # Cameras configs
     camera_configs = {
         "images":{
-            'count': 14,  # 8(Downward-angles) + 4(Upward-angles) + 2(Top-Down)
+            'count': 27,  # 24 (Downward-angles 15°) + 3(Upward-angles 120°) 
             'resolution': (350, 350),
             'clipping_range': (0.001, 10000000),
             'frequency': 20,
@@ -231,7 +230,7 @@ def get_thumbnails_pipeline(usd_models_path, dest_dir, render_method):
         },
         "video":{
             'count': 32,
-            'resolution': (400, 400),
+            'resolution': (350, 350),
             'clipping_range': (0.001, 10000000),
             'frequency': 20
         }
@@ -265,6 +264,7 @@ def get_thumbnails_pipeline(usd_models_path, dest_dir, render_method):
         camera.set_clipping_range(*camera_config['clipping_range'])
         camera.initialize()
         camera.add_distance_to_image_plane_to_frame()
+        # print(camera.get_focal_length())
         cameras.append(camera)
 
     # 2. Load the models
@@ -296,28 +296,25 @@ def get_thumbnails_pipeline(usd_models_path, dest_dir, render_method):
 
     delete_prim("/World/background")
 
-        
-
-
-        
 def render_pcd_with_color(model_path, model_name, world, cameras):
     '''
-    Args:
-        model_path: the path of the model usd file
-        model_name: the name of the model, debugging purpose only
-        world: the simulation world
-        cameras: the list of cameras to capture the point cloud data
-    Returns:
-        The painted point cloud data, centered at the origin.
+    Render the pcd/mesh with color.
+
+    :param model_path: the path of the model usd file
+    :param model_name: the name of the model, debugging purpose only
+    :param world: the simulation world
+    :param cameras: the list of cameras to capture the point cloud data
+    
+    :return: The painted point cloud data, centered at the origin.
     '''
     # Parse the model path to get the index
     relative_path = model_path.split('rawUsd/')[1]
     scene_index = relative_path.split('/models/')[0]
 
-
     # Load the model into the world
     show_prim_path = "/World/Show"
     prim = create_prim(show_prim_path, position=(0,0,0), scale=(1, 1, 1), usd_path=model_path)
+    visiblePrims(prim)
     stage = omni.usd.get_context().get_stage()
     prim_check_path = "/World/Show/Instance"
     prim_check = stage.GetPrimAtPath(prim_check_path)
@@ -331,7 +328,7 @@ def render_pcd_with_color(model_path, model_name, world, cameras):
         print("prim created")
 
     # Compute the bounding box of the model
-    bbox = compute_bbox(prim)
+    bbox = compute_prim_bbox(prim)
     min_point = np.array(bbox.min)
     max_point = np.array(bbox.max)
     mx,my,mz = max_point - min_point
@@ -388,8 +385,15 @@ def render_pcd_with_color(model_path, model_name, world, cameras):
 
     return pcd_with_color
 
+def get_painted_geometry_pipeline(usd_models_path, scene_usd_file_path, dest_path):
+    """
+    The pipeline of getting the painted geometry. Loop processing all the models in the given path.
 
-def get_painted_pcd_pipeline(usd_models_path, scene_usd_file_path, dest_path, painting=True):
+    :param usd_models_path: The path contains all instance models in one scene.
+    :param scene_usd_file_path: The path of the scene usd file.
+    :param dest_path: The output directory to save the painted geometry.
+    :return: None, the painted geometry will be saved in the dest_path.
+    """
 
     # 0. (Optional) Group the duplicate prims
 
@@ -416,17 +420,19 @@ def get_painted_pcd_pipeline(usd_models_path, scene_usd_file_path, dest_path, pa
 
     # 2. Get the original prim from the scene usd file
     scene_stage = Usd.Stage.Open(scene_usd_file_path)
+    meters_per_unit = scene_stage.GetMetadata("metersPerUnit")
+    print(f"meters per unit: {meters_per_unit}")
     instance_prims = get_prims_wo_structure(scene_stage)
 
     # 3. Get colored pcd from render_pcd_with_color()
-    pcs_output_dir = os.path.join(dest_path, "pcs")
+    # pcs_output_dir = os.path.join(dest_path, "pcs")
     meshes_output_dir = os.path.join(dest_path, "meshes")
 
     for model_name in tqdm(os.listdir(usd_models_path)):
-        pcs_output_path = os.path.join(pcs_output_dir, f"{model_name}.npy")
-        if os.path.exists(pcs_output_path):
-            print(f"[INFO] The {model_name} has been rendered, skip it!")
-            continue
+        # pcs_output_path = os.path.join(pcs_output_dir, f"{model_name}.npy")
+        # if os.path.exists(pcs_output_path):
+        #     print(f"[INFO] The {model_name} has been rendered, skip it!")
+        #     continue
         
         meshes_output_path = os.path.join(meshes_output_dir, f"{model_name}.ply")
         if os.path.exists(meshes_output_path):
@@ -457,37 +463,41 @@ def get_painted_pcd_pipeline(usd_models_path, scene_usd_file_path, dest_path, pa
             mesh_from_usd = trimesh.Trimesh(vertices=np.asarray(mesh_from_usd.vertices), faces=np.asarray(mesh_from_usd.triangles))
             # downsampled_mesh = downsample_mesh_naive(mesh_from_usd)
             downsampled_mesh = mesh_from_usd
+            
             print(f"Downsample mesh from {len(mesh_from_usd.triangles)} to {len(downsampled_mesh.triangles)} triangles")
             if is_glass:
                 glass_color = (0.863, 0.957, 0.961)
-                painted_pcd = paint_pure_color(points_from_usd, glass_color, downsample_points = 15000)
-                painted_pcd_float32 = painted_pcd.astype(np.float32)
-                np.save(pcs_output_path, painted_pcd_float32)
+                # painted_pcd = paint_pure_color(points_from_usd, glass_color, downsample_points = 15000)
+                # painted_pcd[:, :3] *= meters_per_unit * 1000
+                # painted_pcd_float32 = painted_pcd.astype(np.float32)
+                # np.save(pcs_output_path, painted_pcd_float32)
 
                 colored_vertices = paint_pure_color(np.asarray(downsampled_mesh.vertices), glass_color, downsample_points = 15000)
                 downsampled_mesh.visual.vertex_colors = colored_vertices[:, 3:]
+                downsampled_mesh.vertices *= meters_per_unit * 1000
                 downsampled_mesh.export(meshes_output_path)
 
             else:
                 transform_matrix = get_transform_from_prim(prim_from_scene)
-                pcd_wo_color = points_from_usd.copy()
+                # pcd_wo_color = points_from_usd.copy()
                 # norm_pcd_wo_color = norm_coords(pcd_wo_color)
-                transformed_pcd_with_color = transform_pc(pcd_with_color, transform_matrix)
-                norm_transformed_coords = norm_coords(transformed_pcd_with_color)
-                norm_pcd_with_color = np.concatenate((norm_transformed_coords, pcd_with_color[:, 3:]), axis = 1)
-                painted_pcd_wo_color = paint_color(pcd_wo_color, norm_pcd_with_color)
-                painted_data_float32 = painted_pcd_wo_color.astype(np.float32)
+                transformed_pcd_with_color = transform_point_cloud(pcd_with_color, transform_matrix)
+                norm_pcd_with_color, _, _ = normalize_point_cloud(transformed_pcd_with_color)
+                # painted_pcd_wo_color = paint_color(pcd_wo_color, norm_pcd_with_color)
+                # # Normalize the units, all points coordinates' unit should be in millimeters
+                # painted_pcd_wo_color[:, :3] *= meters_per_unit * 1000
+                # painted_data_float32 = painted_pcd_wo_color.astype(np.float32)
+
 
                 colored_vertices = paint_color(np.asarray(downsampled_mesh.vertices), norm_pcd_with_color)
                 downsampled_mesh.visual.vertex_colors = colored_vertices[:, 3:]
+                downsampled_mesh.vertices *= meters_per_unit * 1000
 
                 # save
-                np.save(pcs_output_path, painted_data_float32)
+                # np.save(pcs_output_path, painted_data_float32)
                 downsampled_mesh.export(meshes_output_path)
 
     delete_prim("/World/background")
-
-
 
 
 if __name__ == '__main__':
@@ -525,6 +535,7 @@ if __name__ == '__main__':
         if os.path.exists(models_path):
             thumbnails_output_path = os.path.join(args.output_dir, f"{part_str}/{usd_str}/{scene_id}/thumbnails")
             multiviews_output_path = os.path.join(args.output_dir, f"{part_str}/{usd_str}/{scene_id}/thumbnails/multi_views")
+            os.makedirs(multiviews_output_path, exist_ok=True)
             if os.path.exists(thumbnails_output_path) and len(os.listdir(multiviews_output_path)) == len(os.listdir(models_path)):
                 print(f"[INFO] The thumbnails of {scene_id} has been rendered, skip it!")
                 # continue
@@ -533,14 +544,14 @@ if __name__ == '__main__':
                 get_thumbnails_pipeline(models_path, thumbnails_output_path, render_method="images")
 
             output_path = os.path.join(args.output_dir, f"{part_str}/{usd_str}/{scene_id}")
-            pcs_output_path = os.path.join(output_path, "pcs")
+            # pcs_output_path = os.path.join(output_path, "pcs")
             meshes_output_path = os.path.join(output_path, "meshes")
-            if os.path.exists(pcs_output_path) and len(os.listdir(pcs_output_path)) == len(os.listdir(models_path)):
+            if os.path.exists(meshes_output_path) and len(os.listdir(meshes_output_path)) == len(os.listdir(models_path)):
                 print(f"[INFO] The pcs of {scene_id} has been rendered, skip it!")
             else:
-                os.makedirs(pcs_output_path, exist_ok=True)
+                # os.makedirs(pcs_output_path, exist_ok=True)
                 os.makedirs(meshes_output_path, exist_ok=True)
-                get_painted_pcd_pipeline(models_path, clean_usd_path, output_path)
+                get_painted_geometry_pipeline(models_path, clean_usd_path, output_path)
 
     
     simulation_app.close()
